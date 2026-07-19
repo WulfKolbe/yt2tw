@@ -19,9 +19,39 @@ existing `--slides` OCR feature is orthogonal and unused here.)
 ## Boundary / division of labour
 
 ```
-playlist URL ──► YTDRILL ──► <series>.article.md  ──► TEXTRILL ──► article.tex
-                        └──► <series>.deck.md     ──► TEXTRILL ──► beamer.tex
+playlist URL ──► YTDRILL ──► <series>.article.txt ──► textscan --emit docmodel ──► project ──► article.tex
+                        └──► <series>.deck.txt    ──► textscan --emit docmodel ──► project ──► beamer.tex
 ```
+
+Downstream is **`textscan`** (TEXTDRILL, `PYTHONPATH=$HOME/TEXTDRILL/src
+python3 -m textscan <file> --emit docmodel`): it types plain-text lines into a
+PDFDRILL `docmodel` (Page/Section/Paragraph/ListItem/Citation/Reference), which
+a projector renders to LaTeX. YTDRILL stops at the text file.
+
+## Optimal format = structured PLAIN TEXT (not `#` Markdown)
+
+textscan scores headings from plain-text features (title-case/ALL-CAPS standalone
+lines, blank-surrounded, few words, no trailing period); a leading `#` symbol
+*lowers* the score, and `-`/`*` bullets suppress citation detection. Measured on
+a real YTDRILL summary:
+
+| format | Sections | Citations |
+|---|---|---|
+| raw Markdown (`## H`, `- b`) | 9 / 12 | 0 |
+| plain text (bare `H`, `• b`) | **12 / 12** | **3** |
+
+So YTDRILL emits textscan-optimal plain text via a **deterministic normalizer**
+`to_textscan_text(md) -> str` (pure, unit-tested):
+- heading lines `^#{1,6}\s+(.*)` → the bare text (title case, no `#`)
+- bullet lines `^\s*[-*]\s+` → `• ` prefix
+- blank-line paragraph separation preserved
+- inline numeric `[n]` citations kept as-is (Perplexity already emits them); the
+  `References` section stays a bare `References` heading line (textscan's biblio
+  trigger). BibTeX `@{...}` blocks are dropped from the text (they're not prose;
+  the `bibtex` tiddler field still carries them for pdfdrill).
+
+This normalizer is the core of "produce optimal format" and is verified by
+running the output back through `textscan --emit docmodel` in the test suite.
 
 ## Components
 
@@ -68,15 +98,19 @@ which the source layer already produced; it does NOT trigger any download).
 From the per-video results (each: title, summary markdown, deck markdown,
 bibtex entries, order index):
 
-- `<series>.article.md`: `# <series title>`, then per video `## <video title>`
-  + its summary body, in playlist order; ALL BibTeX entries merged and
-  **de-duped by citekey** into a single trailing `## References` section.
-- `<series>.deck.md`: `# <series title>`, then per video `## <video title>`
-  + that video's frame outline, concatenated in order — a Beamer-ready Markdown.
+- `<series>.article.txt`: series title (bare line), then per video the video
+  title (bare heading line) + `to_textscan_text(summary)`, in playlist order;
+  all inline `[n]` citations preserved. (BibTeX is not prose → omitted from the
+  text.)
+- `<series>.deck.txt`: series title, then per video the video title +
+  `to_textscan_text(deck)` — the frame outline as plain text; textscan makes a
+  Section per frame heading + a List per bullet group, which the projector
+  renders to Beamer frames.
 
-These two pure builders (`build_article_md`, `build_deck_md`) are the unit-test
-surface: given fake per-video dicts → exact combined Markdown, order preserved,
-references merged/de-duped.
+The pure builders (`to_textscan_text`, `build_article_txt`, `build_deck_txt`)
+are the unit-test surface: given fake per-video dicts → exact plain text, order
+preserved. An integration test runs a built file back through
+`textscan --emit docmodel` and asserts Sections/Citations appear.
 
 ### 5. CLI
 
