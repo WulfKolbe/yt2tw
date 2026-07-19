@@ -445,6 +445,62 @@ def test_asr_skips_without_audio():
     assert ctx.transcript == "" and ctx.segments == []
 
 
+def test_to_textscan_text_normalizes():
+    from ytdrill.series import to_textscan_text
+    md = ("## Abstract\n\nHello world [1].\n\n- first\n* second\n\n"
+          "## References\n\n[1] A paper\n\n"
+          "## BibTeX Entries\n\n@article{x2020,\n  title={T},\n}\n")
+    out = to_textscan_text(md)
+    assert "Abstract" in out and "## Abstract" not in out   # heading -> bare line
+    assert "• first" in out and "• second" in out           # -/* bullets -> dot
+    assert "Hello world [1]." in out                        # inline citation kept
+    assert "References" in out and "[1] A paper" in out      # biblio kept
+    assert "@article" not in out and "BibTeX" not in out     # bibtex section dropped
+    assert "#" not in out                                    # no markdown left
+
+
+def test_build_article_txt_orders_and_titles():
+    from ytdrill.series import build_article_txt
+    videos = [
+        {"title": "Video One", "summary": "## Intro\n\nfoo [1]."},
+        {"title": "Video Two", "summary": "## Intro\n\nbar."},
+    ]
+    out = build_article_txt("My Series", videos)
+    assert out.index("My Series") < out.index("Video One") < out.index("Video Two")
+    assert "foo [1]." in out and "#" not in out
+
+
+def test_build_deck_txt_uses_deck_field():
+    from ytdrill.series import build_deck_txt
+    out = build_deck_txt("S", [{"title": "V1", "deck": "## Frame A\n\n- point"}])
+    assert "Frame A" in out and "• point" in out and "#" not in out
+
+
+def test_article_parses_through_textscan():
+    """The built plain text must parse OPTIMALLY through the real downstream:
+    bare headings → Sections, [n] → Citations. Skips if TEXTDRILL is absent."""
+    import os
+    import subprocess
+    import tempfile
+    src = Path.home() / "TEXTDRILL" / "src"
+    if not (src / "textscan").is_dir():
+        print("  (TEXTDRILL/textscan unavailable — downstream check skipped)")
+        return
+    from ytdrill.series import build_article_txt
+    md = ("## Overview\n\nA result is shown [1].\n\n- alpha\n- beta\n\n"
+          "## Method\n\nDetails here.\n\n## References\n\n[1] Paper X\n")
+    art = build_article_txt("Test Series",
+                            [{"title": "Episode One", "summary": md}])
+    f = Path(tempfile.mkdtemp()) / "a.txt"
+    f.write_text(art, encoding="utf-8")
+    r = subprocess.run([sys.executable, "-m", "textscan", str(f),
+                        "--emit", "docmodel"], capture_output=True, text=True,
+                       env=dict(os.environ, PYTHONPATH=str(src)))
+    types = [o["type"] for o in json.loads(r.stdout)["objects"]]
+    assert types.count("Section") >= 3      # series + video + content headings
+    assert "Citation" in types              # [1] recognised
+
+
 if __name__ == "__main__":
     for fn in (test_srt_clean, test_srt_matches_awk,
                test_json3_clean, test_emit_tiddler,
@@ -459,7 +515,11 @@ if __name__ == "__main__":
                test_bibkey_of_shared_helper, test_emit_bibkey_override,
                test_audio_layer_format_excludes_video,
                test_run_plan_lazy_and_composable,
-               test_asr_segments_from_whisper, test_asr_skips_without_audio):
+               test_asr_segments_from_whisper, test_asr_skips_without_audio,
+               test_to_textscan_text_normalizes,
+               test_build_article_txt_orders_and_titles,
+               test_build_deck_txt_uses_deck_field,
+               test_article_parses_through_textscan):
         fn()
         print(f"ok  {fn.__name__}")
     print("all tests passed")
