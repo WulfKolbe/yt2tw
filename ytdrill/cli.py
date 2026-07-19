@@ -24,6 +24,7 @@ from .modules.local import LocalSource
 from .modules.references import ExtractReferences
 from .modules.slides import SlideExtract
 from .modules.summarize import Summarize
+from .modules.slide_outline import SlideOutline
 from .modules.asr import WhisperASR
 from .modules.emit import EmitTiddler
 
@@ -37,6 +38,7 @@ REGISTRY = {
     "video": MediaDownload,      # last resort, for slide extraction
     "slides": SlideExtract,
     "summarize": Summarize,
+    "slide_outline": SlideOutline,
     "extract_references": ExtractReferences,
     "emit_tiddler": EmitTiddler,
 }
@@ -56,9 +58,20 @@ DEFAULT_CONFIG = {
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ytdrill")
-    ap.add_argument("url",
+    ap.add_argument("url", nargs="?",
                     help="YouTube URL, or path to a local video file "
-                         "(sidecar <stem>.<lang>.srt is used as transcript)")
+                         "(sidecar <stem>.<lang>.srt is used as transcript); "
+                         "omit when using --series")
+    ap.add_argument("--series", default=None,
+                    help="a YouTube playlist URL (expanded via yt-dlp) or a "
+                         "file of video URLs (one per line): process the whole "
+                         "series into <name>.article.txt + <name>.deck.txt "
+                         "(textscan-ready plain text)")
+    ap.add_argument("--series-name", default=None,
+                    help="series title (default: playlist title / file stem)")
+    ap.add_argument("--asr", action="store_true",
+                    help="series: enable the Whisper fallback for caption-less "
+                         "videos (off by default for series)")
     ap.add_argument("--workdir", default=None,
                     help="working directory (default: temp dir, NOT ~/Downloads)")
     ap.add_argument("--config", default=None, help="path to config.json")
@@ -84,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
         default = Path(__file__).parents[1] / "config.json"
         config = load_config(default) if default.is_file() else dict(DEFAULT_CONFIG)
 
-    is_local = Path(args.url).expanduser().is_file()
+    if not args.series and not args.url:
+        ap.error("give a URL/file, or --series <playlist-url|file>")
 
     workdir = Path(args.workdir) if args.workdir \
         else Path(tempfile.mkdtemp(prefix="ytdrill."))
@@ -93,6 +107,23 @@ def main(argv: list[str] | None = None) -> int:
     load_env(Path(args.env) if args.env else None,
              search=[workdir, Path(__file__).parents[1], Path.cwd()])
 
+    if args.series:
+        from .series import expand_series_input, run_series, write_series_outputs
+        urls, default_name = expand_series_input(args.series)
+        name = args.series_name or default_name
+        log.info("series %r: %d videos", name, len(urls))
+        videos = run_series(urls, series_name=name, workdir=workdir,
+                            config=config, registry=REGISTRY, want_asr=args.asr,
+                            log_fn=lambda m: log.info("  %s", m))
+        if not videos:
+            log.error("no videos processed")
+            return 1
+        art, deck = write_series_outputs(name, videos, workdir)
+        print(art)
+        print(deck)
+        return 0
+
+    is_local = Path(args.url).expanduser().is_file()
     ctx = Context(url=args.url, workdir=workdir, config=config)
     # Lazy escalation (planner.run_plan): captions first; download audio+ASR
     # only when there are no captions; download the video ONLY for slides.

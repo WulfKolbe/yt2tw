@@ -370,6 +370,7 @@ def _plan_reg(ran, *, captions):
         "asr": mk("asr", fill),               # ASR fills the transcript
         "summarize": mk("summarize"),
         "extract_references": mk("extract_references"),
+        "slide_outline": mk("slide_outline"),
         "video": mk("video"), "slides": mk("slides"),
         "emit_tiddler": mk("emit_tiddler"),
     }
@@ -476,6 +477,58 @@ def test_build_deck_txt_uses_deck_field():
     assert "Frame A" in out and "• point" in out and "#" not in out
 
 
+def test_run_plan_slide_outline_after_summary():
+    from ytdrill.planner import run_plan
+    import tempfile
+    ran: list[str] = []
+    run_plan(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
+             _plan_reg(ran, captions=True), is_local=False,
+             want_summary=True, want_slide_outline=True)
+    assert "slide_outline" in ran
+    assert ran.index("summarize") < ran.index("slide_outline") < ran.index("emit_tiddler")
+    # not requested → absent
+    ran.clear()
+    run_plan(Context(url="u", workdir=Path(tempfile.mkdtemp()), config={}),
+             _plan_reg(ran, captions=True), is_local=False,
+             want_summary=True, want_slide_outline=False)
+    assert "slide_outline" not in ran
+
+
+def test_slide_outline_skips_without_transcript():
+    import tempfile
+    from ytdrill.modules.slide_outline import SlideOutline
+    ctx = Context(url="u", workdir=Path(tempfile.mkdtemp()), config={})
+    SlideOutline({}).run(ctx)               # no transcript → graceful no-op
+    assert getattr(ctx, "deck_md", "") == ""
+
+
+def test_expand_series_input_reads_file():
+    import tempfile
+    from ytdrill.series import expand_series_input
+    f = Path(tempfile.mkdtemp()) / "urls.txt"
+    f.write_text("https://youtu.be/a\n# a comment\n\nhttps://youtu.be/b\n")
+    urls, name = expand_series_input(str(f))
+    assert urls == ["https://youtu.be/a", "https://youtu.be/b"]
+    assert name == "urls"                   # file stem is the default series name
+
+
+def test_run_series_collects_and_isolates_failure():
+    import tempfile
+    from ytdrill.series import run_series
+
+    def fake_run(ctx, registry, **kw):
+        n = ctx.url.rsplit("/", 1)[-1]
+        if n == "bad":
+            raise RuntimeError("boom")
+        ctx.title = f"T{n}"; ctx.summary = f"## S\n\n{n}"; ctx.deck_md = f"## F\n\n- {n}"
+
+    res = run_series(["https://x/a", "https://x/bad", "https://x/c"],
+                     series_name="S", workdir=Path(tempfile.mkdtemp()),
+                     config={}, registry={}, run=fake_run)
+    assert [v["title"] for v in res] == ["Ta", "Tc"]        # 'bad' skipped
+    assert res[0]["summary"].startswith("## S") and res[1]["deck"].startswith("## F")
+
+
 def test_article_parses_through_textscan():
     """The built plain text must parse OPTIMALLY through the real downstream:
     bare headings → Sections, [n] → Citations. Skips if TEXTDRILL is absent."""
@@ -519,6 +572,10 @@ if __name__ == "__main__":
                test_to_textscan_text_normalizes,
                test_build_article_txt_orders_and_titles,
                test_build_deck_txt_uses_deck_field,
+               test_run_plan_slide_outline_after_summary,
+               test_slide_outline_skips_without_transcript,
+               test_expand_series_input_reads_file,
+               test_run_series_collects_and_isolates_failure,
                test_article_parses_through_textscan):
         fn()
         print(f"ok  {fn.__name__}")

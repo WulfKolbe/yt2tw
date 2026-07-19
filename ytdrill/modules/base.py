@@ -45,6 +45,9 @@ class Context:
     summary: str = ""                           # markdown
     summary_model: str = ""
 
+    # populated by SlideOutline (the Beamer deck outline, markdown)
+    deck_md: str = ""
+
     # populated by MediaDownload (optional, for slide isolation later)
     video_path: Path | None = None
     audio_path: Path | None = None

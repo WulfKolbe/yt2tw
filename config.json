@@ -19,6 +19,13 @@
       "secret_cmd": "apivault get perplexity",
       "howto": "prompts/howto.md"
     },
+    "slide_outline": {
+      "model": "sonar",
+      "max_tokens": 2048,
+      "temperature": 0.2,
+      "secret_cmd": "apivault get perplexity",
+      "howto": "prompts/slides.md"
+    },
     "media": {
       "format": "",
       "outtmpl": "%(id)s.%(ext)s"

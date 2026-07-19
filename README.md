@@ -40,6 +40,10 @@ python -m ytdrill --workdir /tmp/x URL # default is a fresh temp dir (never ~/Do
 python -m ytdrill /path/to/video.mkv   # LOCAL file (e.g. 4K Video Downloader+ export):
                                      # transcript from sidecar <stem>.<lang>.srt,
                                      # --slides works directly on the file
+python -m ytdrill --series <playlist-url|urls.txt> [--series-name NAME]
+                                     # whole series -> <name>.article.txt +
+                                     # <name>.deck.txt (textscan-ready plain text
+                                     # for TEXTDRILL -> LaTeX article + Beamer)
 ```
 
 The path of the emitted `<bibkey>_video_0001.json` is printed on stdout, so it
@@ -86,7 +90,24 @@ caption track. The modules:
 | `extract_references` | parses the `@type{key,...}` BibTeX entries the howto forces into the summary (brace-counting, nested braces safe) and attaches `bibtex` + `cite-keys` tiddler fields via the additive `ctx.extra_fields` contract — the direct pdfdrill handoff |
 | `media`       | *(optional, `--media`)* video + **original** audio stream (`language_preference`/`format_note=original` pinning) — prep for slide isolation |
 | `slides`      | *(optional, `--slides`)* license-clean vid2slides replacement: ffmpeg scene-change frames + chapter marks → dHash dedupe (stdlib PGM parse, no new Python deps) → per-frame Tesseract OCR → Ghostscript merge into `<bibkey>_slides.pdf`; attaches `slides-pdf` + `slide-times` fields — the PDF is the pdfdrill handoff |
+| `slide_outline`| *(series / `want_slide_outline`)* a second Sonar pass over the **transcript** → a frame-sized Beamer outline (`##` frame headings + terse `-` bullets); writes `<bibkey>.deck.md`, sets `ctx.deck_md` |
 | `emit_tiddler`| single-tiddler TW JSON array, `$Bibkey_$type_$serial` naming     |
+
+### Series → LaTeX (via TEXTDRILL)
+
+`--series` expands a playlist (yt-dlp) or reads a URL-list file, runs each video
+(summary + slide outline), and writes two **textscan-optimal plain-text** files
+via `ytdrill/series.py`:
+
+- `<name>.article.txt` — the written-text source (per-video summaries, in order)
+- `<name>.deck.txt` — the Beamer source (per-video slide outlines)
+
+`to_textscan_text()` converts the Sonar markdown to what
+[`textscan`](file://$HOME/TEXTDRILL/src) scores best — **bare title-case
+headings** (no `#`), `•` bullets, kept `[n]` citations, BibTeX dropped (measured:
+12/12 sections + 3 citations vs 9 + 0 for raw markdown). Downstream:
+`PYTHONPATH=$HOME/TEXTDRILL/src python3 -m textscan <file> --emit docmodel` →
+docmodel → LaTeX projector (article / Beamer). YTDRILL emits only the text.
 
 ## Tiddler schema
 

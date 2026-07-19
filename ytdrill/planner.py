@@ -37,6 +37,7 @@ from .stagerun import _detail
 def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
              want_summary: bool = True, want_slides: bool = False,
              want_media: bool = False, want_asr: bool = True,
+             want_slide_outline: bool = False,
              on_event: Callable[[str, dict], None] | None = None) -> list[dict]:
     """Run the lazy escalation and return stage records ``[{node, cost_ms,
     detail}]``. Composes the orthogonal options (summary × slides) and inserts
@@ -88,6 +89,10 @@ def run_plan(ctx: Context, registry: dict[str, type], *, is_local: bool,
     if want_summary:
         run_one("summarize")
         run_one("extract_references")
+
+    # -- slide-outline layer (Beamer deck; needs the transcript, not the summary) --
+    if want_slide_outline:
+        run_one("slide_outline")
 
     # -- video / slides layer (last resort; a local file is already the video) --
     if (want_slides or want_media) and not is_local:
